@@ -1,1 +1,315 @@
-s
+-- Global Variables
+if not getgenv().WebHookUrl then
+    getgenv().WebHookUrl = "" -- Default empty if not set
+end
+
+-- Services
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+
+-- Constants
+local RARITY_COLORS = {
+    [Color3.fromRGB(152, 152, 152)] = "Common",
+    [Color3.fromRGB(91, 194, 80)] = "Uncommon",
+    [Color3.fromRGB(75, 77, 195)] = "Rare",
+    [Color3.fromRGB(146, 70, 159)] = "Epic",
+    [Color3.fromRGB(244, 154, 9)] = "Legendary"
+}
+
+local ULTIMATE_WEAPONS = {
+    ["Voidspire & Abyssal Veil"] = true,
+    ["Voidfallen's Effigy & Edict"] = true,
+    ["Hofund"] = true,
+    ["Laevateinn"] = true
+}
+
+local LEGENDARY_WEAPONS = {
+    ["Akuma's Soulreaver"] = true,
+    ["Akuma's Wraithbringer"] = true,
+    ["Beastmaster Spell Scythe"] = true,
+    ["Beastmaster War Scythe"] = true,
+    ["Champion's Destiny"] = true,
+    ["Champion's Fury"] = true,
+    ["Champion's Judgement"] = true,
+    ["Champion's Oath"] = true,
+    ["Crystalized Greatsword"] = true,
+    ["Daybreak And Gildensong"] = true,
+    ["Desert Fury"] = true,
+    ["Desert Mirage"] = true,
+    ["Desert Wrath"] = true,
+    ["Dual Bioforged Drills"] = true,
+    ["Dual Godforged Blades"] = true,
+    ["Dual Phoenix Daggers"] = true,
+    ["Eldenbark Greatstaff"] = true,
+    ["Eldenbark Greatsword"] = true,
+    ["Enhanced Inner Focus"] = true,
+    ["Enhanced Inner Rage"] = true,
+    ["Frostwarden"] = true,
+    ["Galactic Dual Blades"] = true,
+    ["Galactic Pike"] = true,
+    ["Gildenscale Oath And Aegis"] = true,
+    ["Godforged Greatstaff"] = true,
+    ["Gravity Leap"] = true,
+    ["Gungnir"] = true,
+    ["Hextech Overloaded Staff"] = true,
+    ["Inventor's Greatsword"] = true,
+    ["Inventor's Spellblade"] = true,
+    ["Kraken Slayer"] = true,
+    ["Lava King's Spell Daggers"] = true,
+    ["Lava King's Warscythe"] = true,
+    ["Mjolnir"] = true,
+    ["Oracle's Ascendance"] = true,
+    ["Oracle's Gaze"] = true,
+    ["Oracle's Revelation"] = true,
+    ["Oracle's Wisdom"] = true,
+    ["Overlord's Manablade"] = true,
+    ["Overlord's Rageblade"] = true,
+    ["Phoenix Greatstaff"] = true,
+    ["Sakura Greatstaff"] = true,
+    ["Sakura Katana"] = true,
+    ["Sea King's Greatstaff"] = true,
+    ["Sea King's Trident"] = true,
+    ["Sea Serpent's Wings"] = true,
+    ["Soulstealer Greatsword"] = true,
+    ["Staff of the Gods"] = true,
+    ["Twisted Wood Greatstaff"] = true,
+    ["Twisted Wood Greatsword"] = true,
+    ["Unstable Warp"] = true,
+    ["Voidborn's Embrace"] = true,
+    ["Voidborn's Malice"] = true,
+    ["Winterborne"] = true
+}
+
+-- Helper Functions
+local function getRainbowColor()
+    local frequency = 2 * math.pi / 6
+    local timestamp = tick()
+    
+    local r = math.sin(frequency * timestamp + 0) * 127 + 128
+    local g = math.sin(frequency * timestamp + 2) * 127 + 128
+    local b = math.sin(frequency * timestamp + 4) * 127 + 128
+    
+    return bit32.lshift(math.floor(r), 16) + bit32.lshift(math.floor(g), 8) + math.floor(b)
+end
+
+local function getClosestColor(color)
+    local minDistance = math.huge
+    local closestRarity = "Unknown"
+    
+    for rarityColor, rarity in pairs(RARITY_COLORS) do
+        local dr = color.R - rarityColor.R
+        local dg = color.G - rarityColor.G
+        local db = color.B - rarityColor.B
+        local distance = math.sqrt(dr * dr + dg * dg + db * db)
+        
+        if distance < minDistance then
+            minDistance = distance
+            closestRarity = rarity
+        end
+    end
+    
+    return closestRarity
+end
+
+local function getEmbedColor(items, isGreggBoss)
+    for _, item in ipairs(items) do
+        if ULTIMATE_WEAPONS[item.name] or LEGENDARY_WEAPONS[item.name] then
+            return 0xFF8000
+        end
+    end
+    return isGreggBoss and 0xFF8000 or 0x964B00
+end
+
+local function SendDiscordEmbed(playerName, items, isGreggBoss)
+    if not getgenv().WebHookLoots or not getgenv().WebHookUrl or getgenv().WebHookUrl == "" then
+        return
+    end
+
+    local lootList = ""
+    for _, item in ipairs(items) do
+        lootList = lootList .. "Loot Got: " .. item.name .. " [" .. item.rarity .. "]\n"
+    end
+    
+    local data = {
+        ["embeds"] = {{
+            ["title"] = "NSHUB Loot Notifier",
+            ["description"] = lootList,
+            ["color"] = getEmbedColor(items, isGreggBoss),
+            ["footer"] = {
+                ["text"] = "Player: " .. playerName .. " • " .. os.date("%I:%M %p")
+            }
+        }}
+    }
+
+    local hasSpecialDrop = false
+    for _, item in ipairs(items) do
+        if ULTIMATE_WEAPONS[item.name] or LEGENDARY_WEAPONS[item.name] then
+            hasSpecialDrop = true
+            break
+        end
+    end
+    
+    if hasSpecialDrop then
+        for i = 1, 10 do
+            data.embeds[1].color = getRainbowColor()
+            
+            local success, error = pcall(function()
+                request({
+                    Url = getgenv().WebHookUrl,
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = HttpService:JSONEncode(data)
+                })
+            end)
+            
+            if not success then
+                break
+            end
+            
+            task.wait(1)
+        end
+    else
+        pcall(function()
+            request({
+                Url = getgenv().WebHookUrl,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = HttpService:JSONEncode(data)
+            })
+        end)
+    end
+end
+
+-- Item Listening Function
+local function listenForNewItems()
+    local player = Players.LocalPlayer
+    if not player then
+        return
+    end
+    
+    local function getInventoryUI()
+        local playerGui = player:WaitForChild("PlayerGui", 5)
+        if not playerGui then return end
+        
+        local inventoryUi = playerGui:WaitForChild("InventoryUi", 5)
+        if not inventoryUi then return end
+        
+        local main = inventoryUi:WaitForChild("Main", 5)
+        if not main then return end
+        
+        local display = main:WaitForChild("Display", 5)
+        if not display then return end
+        
+        local gear = display:WaitForChild("Gear", 5)
+        if not gear then return end
+        
+        return gear:WaitForChild("ItemScrollingFrame", 5)
+    end
+    
+    local itemScrollingFrame = getInventoryUI()
+    if not itemScrollingFrame then
+        return
+    end
+    
+    local newItems = {}
+    local itemRarities = {}
+    local lastCheckTime = 0
+    
+    local function processNewItems()
+        if tick() - lastCheckTime < 0.5 then return end
+        lastCheckTime = tick()
+        
+        if #newItems > 0 then
+            local dungeonProgress = workspace:FindFirstChild("dungeonProgress") and workspace.dungeonProgress.Value or ""
+            local isGreggBoss = dungeonProgress == "inProgress"
+            
+            local formattedItems = {}
+            for i, itemName in ipairs(newItems) do
+                table.insert(formattedItems, {
+                    name = itemName,
+                    rarity = itemRarities[itemName] or "Unknown"
+                })
+            end
+            
+            SendDiscordEmbed(player.Name, formattedItems, isGreggBoss)
+            table.clear(newItems)
+            table.clear(itemRarities)
+        end
+    end
+    
+    itemScrollingFrame.ChildAdded:Connect(function(child)
+        if child:IsA("TextButton") then
+            local imageLabel = child:FindFirstChild("ImageLabel")
+            local rarity = "Unknown"
+            
+            if imageLabel then
+                local imageColor = imageLabel.ImageColor3
+                rarity = getClosestColor(imageColor)
+            end
+            
+            table.insert(newItems, child.Name)
+            itemRarities[child.Name] = rarity
+            
+            task.wait(0.1)
+            processNewItems()
+        end
+    end)
+end
+
+-- Optimized Menu Execution
+local function executeMenuCommands()
+    local RS = game:GetService("ReplicatedStorage")
+    
+    -- Basic asset loading (parallel)
+    coroutine.wrap(function()
+        RS.Utility.AssetRequester.Remote:InvokeServer({{"sound", "Music", "Lobby"}})
+        RS.dataRemoteEvent:FireServer({{[1] = "\1"}, "4"})
+        RS.remotes.RemoteConfigConnection:InvokeServer({"CharacterAltMultipliers"})
+    end)()
+
+    -- Character and inventory setup (parallel)
+    coroutine.wrap(function()
+        RS.dataRemoteEvent:FireServer({{[1] = "\1", [2] = {["\3"] = "select", ["characterIndex"] = 1}}, "M"})
+        RS.Utility.AssetRequester.Remote:InvokeServer({{"ui", "LeaderboardGui"}})
+        RS.remotes.getData:InvokeServer({"GetWeapons"})
+        RS.remotes.reloadInvy:InvokeServer()
+    end)()
+
+    -- Dungeon and progression setup (parallel)
+    coroutine.wrap(function()
+        RS.remotes.getDungeonStats:InvokeServer({"Desert Temple"})
+        RS.remotes.RemoteConfigConnection:InvokeServer({"ProgressionPacks"})
+        RS.remotes.RemoteConfigConnection:InvokeServer({"DungeonLeaderboards"})
+    end)()
+
+    -- Final configurations (parallel)
+    coroutine.wrap(function()
+        RS.dataRemoteEvent:FireServer({{["\3"] = "loaded"}, "\26"})
+        RS.dataRemoteEvent:FireServer({{["\3"] = "loaded"}, "\166"})
+        RS.remotes.FrameworkRemote:FireServer({"UiLoaded"})
+    end)()
+end
+
+-- Main Execution Function
+local function main()
+    -- Load external script first
+    local success, error = pcall(function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/hen56s2/main2/refs/heads/main/2"))()
+    end)
+    
+    if success then
+        -- Execute menu commands and setup webhook in parallel
+        coroutine.wrap(executeMenuCommands)()
+        
+        if getgenv().WebHookLoots then
+            coroutine.wrap(listenForNewItems)()
+        end
+        
+        print("Script execution completed successfully")
+    else
+        warn("Failed to load external script:", error)
+    end
+end
+
+-- Start execution
+main()
