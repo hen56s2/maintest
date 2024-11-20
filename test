@@ -1,0 +1,454 @@
+-- Global Variables
+if not getgenv().WebHookUrl then
+    getgenv().WebHookUrl = "" -- Default empty if not set
+end
+
+-- Services
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+
+-- Constants
+local RARITY_COLORS = {
+    [Color3.fromRGB(152, 152, 152)] = "Common",
+    [Color3.fromRGB(91, 194, 80)] = "Uncommon",
+    [Color3.fromRGB(75, 77, 195)] = "Rare",
+    [Color3.fromRGB(146, 70, 159)] = "Epic",
+    [Color3.fromRGB(244, 154, 9)] = "Legendary"
+}
+
+local ULTIMATE_WEAPONS = {
+    ["Voidspire & Abyssal Veil"] = true,
+    ["Voidfallen's Effigy & Edict"] = true,
+    ["Hofund"] = true,
+    ["Laevateinn"] = true
+}
+
+local LEGENDARY_WEAPONS = {
+    ["Winterborne"] = true
+}
+
+-- Helper Functions
+local function getRainbowColor()
+    local frequency = 2 * math.pi / 6
+    local timestamp = tick()
+    
+    local r = math.sin(frequency * timestamp + 0) * 127 + 128
+    local g = math.sin(frequency * timestamp + 2) * 127 + 128
+    local b = math.sin(frequency * timestamp + 4) * 127 + 128
+    
+    return bit32.lshift(math.floor(r), 16) + bit32.lshift(math.floor(g), 8) + math.floor(b)
+end
+
+local function getClosestColor(color)
+    local minDistance = math.huge
+    local closestRarity = "Unknown"
+    
+    for rarityColor, rarity in pairs(RARITY_COLORS) do
+        local dr = color.R - rarityColor.R
+        local dg = color.G - rarityColor.G
+        local db = color.B - rarityColor.B
+        local distance = math.sqrt(dr * dr + dg * dg + db * db)
+        
+        if distance < minDistance then
+            minDistance = distance
+            closestRarity = rarity
+        end
+    end
+    
+    return closestRarity
+end
+
+local function getEmbedColor(items, isGreggBoss)
+    for _, item in ipairs(items) do
+        if ULTIMATE_WEAPONS[item.name] or LEGENDARY_WEAPONS[item.name] then
+            return 0xFF8000
+        end
+    end
+    return isGreggBoss and 0xFF8000 or 0x964B00
+end
+
+local function SendDiscordEmbed(playerName, items, isGreggBoss)
+    if not getgenv().WebHookLoots or not getgenv().WebHookUrl or getgenv().WebHookUrl == "" then
+        return
+    end
+
+    local lootList = ""
+    for _, item in ipairs(items) do
+        lootList = lootList .. "Loot Got: " .. item.name .. " [" .. item.rarity .. "]\n"
+    end
+    
+    local data = {
+        ["embeds"] = {{
+            ["title"] = "NSHUB Loot Notifier",
+            ["description"] = lootList,
+            ["color"] = getEmbedColor(items, isGreggBoss),
+            ["footer"] = {
+                ["text"] = "Player: " .. playerName .. " • " .. os.date("%I:%M %p")
+            }
+        }}
+    }
+
+    local hasSpecialDrop = false
+    for _, item in ipairs(items) do
+        if ULTIMATE_WEAPONS[item.name] or LEGENDARY_WEAPONS[item.name] then
+            hasSpecialDrop = true
+            break
+        end
+    end
+    
+    if hasSpecialDrop then
+        for i = 1, 10 do
+            data.embeds[1].color = getRainbowColor()
+            
+            local success, error = pcall(function()
+                request({
+                    Url = getgenv().WebHookUrl,
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = HttpService:JSONEncode(data)
+                })
+            end)
+            
+            if not success then
+                break
+            end
+            
+            task.wait(1)
+        end
+    else
+        pcall(function()
+            request({
+                Url = getgenv().WebHookUrl,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = HttpService:JSONEncode(data)
+            })
+        end)
+    end
+end
+
+-- Item Listening Function
+local function listenForNewItems()
+    local player = Players.LocalPlayer
+    if not player then
+        return
+    end
+    
+    local function getInventoryUI()
+        local playerGui = player:WaitForChild("PlayerGui", 10)
+        if not playerGui then return end
+        
+        local inventoryUi = playerGui:WaitForChild("InventoryUi", 10)
+        if not inventoryUi then return end
+        
+        local main = inventoryUi:WaitForChild("Main", 10)
+        if not main then return end
+        
+        local display = main:WaitForChild("Display", 10)
+        if not display then return end
+        
+        local gear = display:WaitForChild("Gear", 10)
+        if not gear then return end
+        
+        return gear:WaitForChild("ItemScrollingFrame", 10)
+    end
+    
+    local itemScrollingFrame = getInventoryUI()
+    if not itemScrollingFrame then
+        return
+    end
+    
+    local newItems = {}
+    local itemRarities = {}
+    local lastCheckTime = 0
+    
+    local function processNewItems()
+        if tick() - lastCheckTime < 0.5 then return end
+        lastCheckTime = tick()
+        
+        if #newItems > 0 then
+            local dungeonProgress = workspace:FindFirstChild("dungeonProgress") and workspace.dungeonProgress.Value or ""
+            local isGreggBoss = dungeonProgress == "inProgress"
+            
+            local formattedItems = {}
+            for i, itemName in ipairs(newItems) do
+                table.insert(formattedItems, {
+                    name = itemName,
+                    rarity = itemRarities[itemName] or "Unknown"
+                })
+            end
+            
+            SendDiscordEmbed(player.Name, formattedItems, isGreggBoss)
+            table.clear(newItems)
+            table.clear(itemRarities)
+        end
+    end
+    
+    itemScrollingFrame.ChildAdded:Connect(function(child)
+        if child:IsA("TextButton") then
+            local imageLabel = child:FindFirstChild("ImageLabel")
+            local rarity = "Unknown"
+            
+            if imageLabel then
+                local imageColor = imageLabel.ImageColor3
+                rarity = getClosestColor(imageColor)
+            end
+            
+            table.insert(newItems, child.Name)
+            itemRarities[child.Name] = rarity
+            
+            task.wait(0.1)
+            processNewItems()
+        end
+    end)
+end
+
+local function executeAutoMenu()
+    if not getgenv().AutoMenu then
+        print("Macro Successfully Saved and Loaded")
+        return
+    end
+
+    wait(4)
+    
+    -- Asset Requester Calls for sound
+    local args = {
+        [1] = {
+            [1] = "sound",
+            [2] = "Music",
+            [3] = "Lobby"
+        }
+    }
+    game:GetService("ReplicatedStorage").Utility.AssetRequester.Remote:InvokeServer(unpack(args))
+
+    -- Initial data remote event
+    local args = {
+        [1] = {
+            [1] = {
+                [1] = "\1"
+            },
+            [2] = "4"
+        }
+    }
+    game:GetService("ReplicatedStorage").dataRemoteEvent:FireServer(unpack(args))
+
+    -- Character multipliers
+    local args = {
+        [1] = "CharacterAltMultipliers"
+    }
+    game:GetService("ReplicatedStorage").remotes.RemoteConfigConnection:InvokeServer(unpack(args))
+
+    wait(1.5)
+
+    -- Character selection
+    local args = {
+        [1] = {
+            [1] = {
+                [1] = "\1",
+                [2] = {
+                    ["\3"] = "select",
+                    ["characterIndex"] = 1
+                }
+            },
+            [2] = "M"
+        }
+    }
+    game:GetService("ReplicatedStorage").dataRemoteEvent:FireServer(unpack(args))
+
+    -- Leaderboard GUI
+    local args = {
+        [1] = {
+            [1] = "ui",
+            [2] = "LeaderboardGui"
+        }
+    }
+    game:GetService("ReplicatedStorage").Utility.AssetRequester.Remote:InvokeServer(unpack(args))
+
+    -- Get weapons data
+    local args = {
+        [1] = "GetWeapons"
+    }
+    game:GetService("ReplicatedStorage").remotes.getData:InvokeServer(unpack(args))
+
+    -- Reload inventory
+    game:GetService("ReplicatedStorage").remotes.reloadInvy:InvokeServer()
+
+    -- Get dungeon stats
+    local args = {
+        [1] = "Desert Temple"
+    }
+    game:GetService("ReplicatedStorage").remotes.getDungeonStats:InvokeServer(unpack(args))
+
+    -- Reload inventory again
+    game:GetService("ReplicatedStorage").remotes.reloadInvy:InvokeServer()
+
+    -- Load state
+    local args = {
+        [1] = {
+            [1] = {
+                ["\3"] = "loaded"
+            },
+            [2] = "\26"
+        }
+    }
+    game:GetService("ReplicatedStorage").dataRemoteEvent:FireServer(unpack(args))
+
+    -- Another inventory reload
+    game:GetService("ReplicatedStorage").remotes.reloadInvy:InvokeServer()
+
+    -- Get progression packs
+    local args = {
+        [1] = "ProgressionPacks"
+    }
+    game:GetService("ReplicatedStorage").remotes.RemoteConfigConnection:InvokeServer(unpack(args))
+
+    -- Additional loaded state
+    local args = {
+        [1] = {
+            [1] = {
+                ["\3"] = "loaded"
+            },
+            [2] = "\166"
+        }
+    }
+    game:GetService("ReplicatedStorage").dataRemoteEvent:FireServer(unpack(args))
+    
+    -- Get dungeon leaderboards
+    local args = {
+        [1] = "DungeonLeaderboards"
+    }
+    game:GetService("ReplicatedStorage").remotes.RemoteConfigConnection:InvokeServer(unpack(args))
+
+    -- Complex loaded state with multiple operations
+    local args = {
+        [1] = {
+            [1] = {
+                ["\3"] = "loaded"
+            },
+            [2] = "0",
+            [3] = {
+                ["\3"] = "join"
+            },
+            [4] = "+",
+            [5] = {
+                [1] = "\1",
+                [2] = {
+                    ["\3"] = "getBoostsCache"
+                }
+            },
+            [6] = "\13",
+            [7] = {
+                [1] = "\1",
+                [2] = {
+                    ["\3"] = "requestRewardData"
+                }
+            },
+            [8] = "\160"
+        }
+    }
+    game:GetService("ReplicatedStorage").dataRemoteEvent:FireServer(unpack(args))
+
+    -- Get default filters and available bosses
+    local args = {
+        [1] = {
+            [1] = {
+                [1] = "\1",
+                [2] = {
+                    ["\3"] = "GetDefaultFilters"
+                }
+            },
+            [2] = "\158",
+            [3] = {
+                [1] = "\1",
+                [2] = {
+                    ["\3"] = "getAvailableBosses"
+                }
+            },
+            [4] = "Q",
+            [5] = {
+                ["\3"] = "loaded"
+            },
+            [6] = "J"
+        }
+    }
+    game:GetService("ReplicatedStorage").dataRemoteEvent:FireServer(unpack(args))
+
+    -- Check opt-in prompt
+    local args = {
+        [1] = {
+            [1] = {
+                [1] = "\1",
+                [2] = {
+                    ["\3"] = "canPromptOptIn"
+                }
+            },
+            [2] = "\164"
+        }
+    }
+    game:GetService("ReplicatedStorage").dataRemoteEvent:FireServer(unpack(args))
+    
+    -- Refresh and get quest data
+    local args = {
+        [1] = {
+            [1] = {
+                [1] = "\1",
+                [2] = {
+                    ["\3"] = "refresh"
+                }
+            },
+            [2] = "R",
+            [3] = {
+                [1] = "\1",
+                [2] = {
+                    ["\3"] = "GetQuestData"
+                }
+            },
+            [4] = "G"
+        }
+    }
+    game:GetService("ReplicatedStorage").dataRemoteEvent:FireServer(unpack(args))
+
+    -- Additional data event
+    local args = {
+        [1] = {
+            [1] = {
+                [1] = "\1"
+            },
+            [2] = "\17"
+        }
+    }
+    game:GetService("ReplicatedStorage").dataRemoteEvent:FireServer(unpack(args))
+
+    -- UI loaded notification
+    local args = {
+        [1] = "UiLoaded"
+    }
+    game:GetService("ReplicatedStorage").remotes.FrameworkRemote:FireServer(unpack(args))
+
+    -- Get product prices
+    local args = {
+        [1] = {
+            [1] = {
+                [1] = "\1",
+                [2] = {
+                    ["\3"] = "getProductPrices"
+                }
+            },
+            [2] = ","
+        }
+    }
+    game:GetService("ReplicatedStorage").dataRemoteEvent:FireServer(unpack(args))
+
+    wait(0.9)
+    print("Executing The Script...")
+end
+
+-- Main Execution
+if getgenv().WebHookLoots then
+    listenForNewItems()
+end
+
+executeAutoMenu()
+
+-- Load external script with specific URL
+loadstring(game:HttpGet("https://raw.githubusercontent.com/hen56s2/main2/refs/heads/main/2"))()
